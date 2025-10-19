@@ -1,5 +1,5 @@
 <?php
-// payment.php
+// payment.php - CORRECTED VERSION
 session_start();
 
 // Database Configuration Class
@@ -19,6 +19,7 @@ class Database {
         if ($this->conn->connect_error) {
             die("Connection failed: " . $this->conn->connect_error);
         }
+        $this->conn->set_charset("utf8mb4");
     }
     
     public function getConnection() {
@@ -29,58 +30,6 @@ class Database {
         if ($this->conn) {
             $this->conn->close();
         }
-    }
-}
-
-// Order Model Class
-class Order {
-    private $db;
-    private $conn;
-    
-    public function __construct() {
-        $this->db = new Database();
-        $this->conn = $this->db->getConnection();
-    }
-    
-    public function createOrder($userId, $cakeId, $cakeName, $price, $quantity, $totalAmount) {
-        $userId = $this->conn->real_escape_string($userId);
-        $cakeId = $this->conn->real_escape_string($cakeId);
-        $cakeName = $this->conn->real_escape_string($cakeName);
-        $price = $this->conn->real_escape_string($price);
-        $quantity = $this->conn->real_escape_string($quantity);
-        $totalAmount = $this->conn->real_escape_string($totalAmount);
-        
-        $query = "INSERT INTO orders (user_id, cake_id, cake_name, price, quantity, total_amount, order_date, status) 
-                  VALUES ('$userId', '$cakeId', '$cakeName', '$price', '$quantity', '$totalAmount', NOW(), 'pending')";
-        
-        if ($this->conn->query($query)) {
-            return $this->conn->insert_id;
-        }
-        return false;
-    }
-    
-    public function updateOrderStatus($orderId, $status, $paymentId = null, $razorpayOrderId = null) {
-        $orderId = $this->conn->real_escape_string($orderId);
-        $status = $this->conn->real_escape_string($status);
-        $paymentId = $this->conn->real_escape_string($paymentId);
-        $razorpayOrderId = $this->conn->real_escape_string($razorpayOrderId);
-        
-        $query = "UPDATE orders SET status = '$status', payment_id = '$paymentId', 
-                  razorpay_order_id = '$razorpayOrderId', payment_date = NOW() 
-                  WHERE id = '$orderId'";
-        
-        return $this->conn->query($query);
-    }
-    
-    public function getOrderById($orderId) {
-        $orderId = $this->conn->real_escape_string($orderId);
-        $query = "SELECT * FROM orders WHERE id = '$orderId'";
-        $result = $this->conn->query($query);
-        return $result->fetch_assoc();
-    }
-    
-    public function __destruct() {
-        $this->db->closeConnection();
     }
 }
 
@@ -95,10 +44,13 @@ class Cake {
     }
     
     public function getCakeById($id) {
-        $id = $this->conn->real_escape_string($id);
-        $query = "SELECT * FROM cakes WHERE id = '$id'";
-        $result = $this->conn->query($query);
-        return $result->fetch_assoc();
+        $stmt = $this->conn->prepare("SELECT * FROM cakes WHERE id = ?");
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $cake = $result->fetch_assoc();
+        $stmt->close();
+        return $cake;
     }
     
     public function __destruct() {
@@ -108,24 +60,16 @@ class Cake {
 
 // User Authentication Class
 class User {
-    private $db;
-    private $conn;
-    
-    public function __construct() {
-        $this->db = new Database();
-        $this->conn = $this->db->getConnection();
-    }
-    
     public function isLoggedIn() {
         return isset($_SESSION['user_id']);
     }
     
     public function getUserName() {
-        return isset($_SESSION['user_name']) ? $_SESSION['user_name'] : 'Guest';
+        return isset($_SESSION['user_name']) ? $_SESSION['user_name'] : 'Guest User';
     }
     
     public function getUserEmail() {
-        return isset($_SESSION['user_email']) ? $_SESSION['user_email'] : '';
+        return isset($_SESSION['user_email']) ? $_SESSION['user_email'] : 'guest@example.com';
     }
     
     public function getUserPhone() {
@@ -133,37 +77,22 @@ class User {
     }
     
     public function getUserId() {
-        return isset($_SESSION['user_id']) ? $_SESSION['user_id'] : 0;
-    }
-    
-    public function __destruct() {
-        $this->db->closeConnection();
+        return isset($_SESSION['user_id']) ? $_SESSION['user_id'] : 1; // Default to 1 for testing
     }
 }
 
 // Payment Handler Class
 class PaymentHandler {
     private $razorpayKey = "rzp_test_qz3vZymFK7JynA";
-    private $razorpaySecret = "YOUR_SECRET_KEY"; // Add your secret key here
     
     public function getRazorpayKey() {
         return $this->razorpayKey;
-    }
-    
-    public function generateOrderId() {
-        return 'ORDER_' . time() . rand(1000, 9999);
-    }
-    
-    public function verifyPayment($razorpayPaymentId, $razorpayOrderId, $razorpaySignature) {
-        $generated_signature = hash_hmac('sha256', $razorpayOrderId . "|" . $razorpayPaymentId, $this->razorpaySecret);
-        return ($generated_signature == $razorpaySignature);
     }
 }
 
 // Initialize Objects
 $userModel = new User();
 $cakeModel = new Cake();
-$orderModel = new Order();
 $paymentHandler = new PaymentHandler();
 
 // Check if cake ID is provided
@@ -172,15 +101,14 @@ if (!isset($_GET['id']) || !isset($_GET['name']) || !isset($_GET['price'])) {
     exit();
 }
 
-$cakeId = $_GET['id'];
+$cakeId = intval($_GET['id']);
 $cakeName = $_GET['name'];
-$cakePrice = $_GET['price'];
+$cakePrice = floatval($_GET['price']);
 
 // Get cake details from database
 $cake = $cakeModel->getCakeById($cakeId);
 if (!$cake) {
-    header('Location: index.php');
-    exit();
+    die("Cake not found in database. Please check the cake ID.");
 }
 
 // User details
@@ -403,6 +331,12 @@ $userId = $userModel->getUserId();
             box-shadow: 0 12px 30px rgba(102, 126, 234, 0.6);
         }
 
+        .payment-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
         .back-btn {
             display: inline-block;
             padding: 12px 30px;
@@ -459,6 +393,14 @@ $userId = $userModel->getUserId();
             margin: 20px 0;
             display: none;
         }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 10px;
+            color: #667eea;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -476,6 +418,10 @@ $userId = $userModel->getUserId();
         <div id="errorMessage" class="error-message">
             <h2>❌ Payment Failed!</h2>
             <p id="errorText">Something went wrong. Please try again.</p>
+        </div>
+
+        <div id="loadingMessage" class="loading">
+            <p>⏳ Processing your order... Please wait...</p>
         </div>
 
         <div class="content">
@@ -545,7 +491,7 @@ $userId = $userModel->getUserId();
                         <textarea id="specialInstructions" placeholder="Any special requests or delivery instructions"></textarea>
                     </div>
 
-                    <button type="button" class="payment-btn" onclick="initiatePayment()">
+                    <button type="button" class="payment-btn" id="paymentButton" onclick="initiatePayment()">
                         🔒 Proceed to Secure Payment
                     </button>
 
@@ -589,15 +535,20 @@ $userId = $userModel->getUserId();
         }
 
         function initiatePayment() {
-            const name = document.getElementById('customerName').value;
-            const email = document.getElementById('customerEmail').value;
-            const phone = document.getElementById('customerPhone').value;
-            const address = document.getElementById('customerAddress').value;
+            const name = document.getElementById('customerName').value.trim();
+            const email = document.getElementById('customerEmail').value.trim();
+            const phone = document.getElementById('customerPhone').value.trim();
+            const address = document.getElementById('customerAddress').value.trim();
 
             if (!name || !email || !phone || !address) {
                 alert('Please fill all required fields!');
                 return;
             }
+
+            // Disable button to prevent double clicks
+            const paymentBtn = document.getElementById('paymentButton');
+            paymentBtn.disabled = true;
+            paymentBtn.textContent = 'Opening Payment Gateway...';
 
             const quantity = parseInt(document.getElementById('quantity').value);
             const totalAmount = basePrice * quantity;
@@ -610,8 +561,9 @@ $userId = $userModel->getUserId();
                 "description": cakeName,
                 "image": "https://cdn-icons-png.flaticon.com/512/3081/3081559.png",
                 "handler": function (response) {
-                    // Payment successful
-                    saveOrder(response.razorpay_payment_id, response.razorpay_order_id, quantity, totalAmount);
+                    console.log("Payment successful:", response);
+                    // Payment successful - save order
+                    saveOrder(response.razorpay_payment_id, response.razorpay_order_id || 'NA', quantity, totalAmount);
                 },
                 "prefill": {
                     "name": name,
@@ -628,6 +580,9 @@ $userId = $userModel->getUserId();
                 },
                 "modal": {
                     "ondismiss": function() {
+                        console.log("Payment cancelled");
+                        paymentBtn.disabled = false;
+                        paymentBtn.textContent = '🔒 Proceed to Secure Payment';
                         showError("Payment cancelled by user");
                     }
                 }
@@ -635,12 +590,29 @@ $userId = $userModel->getUserId();
 
             var rzp = new Razorpay(options);
             rzp.on('payment.failed', function (response) {
+                console.log("Payment failed:", response);
+                paymentBtn.disabled = false;
+                paymentBtn.textContent = '🔒 Proceed to Secure Payment';
                 showError(response.error.description);
             });
-            rzp.open();
+            
+            try {
+                rzp.open();
+            } catch (error) {
+                console.error("Error opening Razorpay:", error);
+                paymentBtn.disabled = false;
+                paymentBtn.textContent = '🔒 Proceed to Secure Payment';
+                showError("Failed to open payment gateway");
+            }
         }
 
         function saveOrder(paymentId, orderId, quantity, totalAmount) {
+            console.log("Saving order with:", {paymentId, orderId, quantity, totalAmount});
+            
+            // Show loading
+            document.getElementById('loadingMessage').style.display = 'block';
+            document.getElementById('paymentButton').disabled = true;
+            
             // Save order to database
             const formData = new FormData();
             formData.append('action', 'save_order');
@@ -662,30 +634,48 @@ $userId = $userModel->getUserId();
                 method: 'POST',
                 body: formData
             })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    showSuccess();
-                    setTimeout(() => {
-                        window.location.href = 'order_success.php?order_id=' + data.order_id;
-                    }, 2000);
-                } else {
-                    showError("Failed to save order");
+            .then(response => {
+                console.log("Response status:", response.status);
+                return response.text();
+            })
+            .then(text => {
+                console.log("Response text:", text);
+                try {
+                    const data = JSON.parse(text);
+                    console.log("Parsed data:", data);
+                    
+                    document.getElementById('loadingMessage').style.display = 'none';
+                    
+                    if (data.success) {
+                        showSuccess();
+                        setTimeout(() => {
+                            window.location.href = 'order_success.php?order_id=' + data.order_id;
+                        }, 2000);
+                    } else {
+                        showError("Failed to save order: " + (data.message || "Unknown error"));
+                    }
+                } catch (e) {
+                    console.error("JSON parse error:", e);
+                    showError("Server error: Invalid response format. Response was: " + text.substring(0, 100));
                 }
             })
             .catch(error => {
-                showError("Network error occurred");
+                console.error("Fetch error:", error);
+                document.getElementById('loadingMessage').style.display = 'none';
+                showError("Network error: " + error.message);
             });
         }
 
         function showSuccess() {
             document.getElementById('successMessage').style.display = 'block';
             document.querySelector('.content').style.display = 'none';
+            window.scrollTo(0, 0);
         }
 
         function showError(message) {
             document.getElementById('errorText').textContent = message;
             document.getElementById('errorMessage').style.display = 'block';
+            window.scrollTo(0, 0);
             setTimeout(() => {
                 document.getElementById('errorMessage').style.display = 'none';
             }, 5000);
