@@ -168,7 +168,8 @@ class CakeView {
                 
                 <nav class="nav-links">
                     <a href="index.php">🏠 Home</a>
-                    <a href="index.php#products">🎂 Products</a>
+                   
+                    <a href="Add prodect.php">🎂Add Products</a>
                     <?php if ($isLoggedIn): ?>
                         <a href="my_orders.php">📦 My Orders</a>
                     <?php endif; ?>
