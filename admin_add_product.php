@@ -2,8 +2,8 @@
 // admin_add_product.php - Simple admin page to add products (cakes)
 session_start();
 
-// Require user to be logged in (basic guard)
-if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
+// Require admin
+if (!isset($_SESSION['is_admin']) || $_SESSION['is_admin'] !== true) {
     header('Location: login.php');
     exit();
 }
@@ -38,48 +38,68 @@ class Database {
     }
 }
 
-$db = new Database();
-$conn = $db->getConnection();
-
-$errors = [];
-$success = '';
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $name = trim($_POST['name'] ?? '');
-    $price = trim($_POST['price'] ?? '');
-
-    if ($name === '' || strlen($name) < 2) {
-        $errors[] = 'Name is required (min 2 characters).';
+class Product {
+    private $conn;
+    public function __construct($conn) { $this->conn = $conn; }
+    public function validate($name, $price) {
+        $errors = [];
+        if ($name === '' || strlen($name) < 2) { $errors[] = 'Name is required (min 2 characters).'; }
+        if ($price === '' || !is_numeric($price) || (float)$price < 0) { $errors[] = 'Price must be a non-negative number.'; }
+        return $errors;
     }
-    if ($price === '' || !is_numeric($price) || (float)$price < 0) {
-        $errors[] = 'Price must be a non-negative number.';
-    }
-
-    if (empty($errors)) {
-        $stmt = $conn->prepare("INSERT INTO cakes (name, price) VALUES (?, ?)");
-        if (!$stmt) {
-            $errors[] = 'Failed to prepare statement: ' . $conn->error;
-        } else {
-            $p = (float)$price;
-            $stmt->bind_param('sd', $name, $p);
-            if ($stmt->execute()) {
-                $success = 'Product added successfully (ID: ' . $stmt->insert_id . ').';
-            } else {
-                $errors[] = 'Insert failed: ' . $stmt->error;
-            }
+    public function create($name, $price) {
+        $stmt = $this->conn->prepare("INSERT INTO cakes (name, price) VALUES (?, ?)");
+        if (!$stmt) { return [false, 'Failed to prepare statement: ' . $this->conn->error]; }
+        $p = (float)$price;
+        $stmt->bind_param('sd', $name, $p);
+        if ($stmt->execute()) {
+            $msg = 'Product added successfully (ID: ' . $stmt->insert_id . ').';
             $stmt->close();
+            return [true, $msg];
         }
+        $err = 'Insert failed: ' . $stmt->error;
+        $stmt->close();
+        return [false, $err];
+    }
+    public function listRecent($limit = 50) {
+        $limit = (int)$limit;
+        $rows = [];
+        $result = $this->conn->query("SELECT id, name, price FROM cakes ORDER BY id DESC LIMIT $limit");
+        if ($result) {
+            while ($row = $result->fetch_assoc()) { $rows[] = $row; }
+        }
+        return $rows;
     }
 }
 
-// Fetch existing cakes (latest first)
-$cakes = [];
-$result = $conn->query("SELECT id, name, price FROM cakes ORDER BY id DESC LIMIT 50");
-if ($result) {
-    while ($row = $result->fetch_assoc()) {
-        $cakes[] = $row;
+class AdminPageController {
+    private $db;
+    private $conn;
+    private $product;
+    public function __construct() {
+        $this->db = new Database();
+        $this->conn = $this->db->getConnection();
+        $this->product = new Product($this->conn);
+    }
+    public function handle() {
+        $errors = [];
+        $success = '';
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $name = trim($_POST['name'] ?? '');
+            $price = trim($_POST['price'] ?? '');
+            $errors = $this->product->validate($name, $price);
+            if (empty($errors)) {
+                list($ok, $msg) = $this->product->create($name, $price);
+                if ($ok) { $success = $msg; } else { $errors[] = $msg; }
+            }
+        }
+        $cakes = $this->product->listRecent(50);
+        return [$errors, $success, $cakes];
     }
 }
+
+$controller = new AdminPageController();
+list($errors, $success, $cakes) = $controller->handle();
 
 ?>
 <!DOCTYPE html>
