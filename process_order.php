@@ -61,9 +61,16 @@ class Order {
                               'payment_id', 'customer_name', 'customer_email', 'customer_phone', 'customer_address'];
             
             foreach ($requiredFields as $field) {
-                if (!isset($data[$field]) || empty($data[$field])) {
-                    error_log("Missing field: $field");
+                if (!isset($data[$field])) {
+                    error_log("Missing field (unset): $field");
                     throw new Exception("Missing required field: $field");
+                }
+                // For string fields, disallow empty string; for numeric fields, allow 0 where valid
+                if (in_array($field, ['cake_name','payment_id','customer_name','customer_email','customer_phone','customer_address'])) {
+                    if (trim((string)$data[$field]) === '') {
+                        error_log("Missing field (empty string): $field");
+                        throw new Exception("Missing required field: $field");
+                    }
                 }
             }
             
@@ -83,7 +90,7 @@ class Order {
             }
             
             $stmt->bind_param(
-                "iisdiisssssss",
+                "iisdidsssssss",
                 $data['user_id'],
                 $data['cake_id'],
                 $data['cake_name'],
@@ -167,12 +174,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             'customer_address' => isset($_POST['customer_address']) ? trim($_POST['customer_address']) : '',
             'special_instructions' => isset($_POST['special_instructions']) ? trim($_POST['special_instructions']) : ''
         ];
+
+        // If this is a cart checkout, ensure cake_id references a valid cake (use first cart item)
+        if ((int)$orderData['cake_id'] <= 0 && isset($_POST['cart_items'])) {
+            $cartItemsJson = $_POST['cart_items'];
+            $decoded = json_decode($cartItemsJson, true);
+            if (is_array($decoded) && count($decoded) > 0 && isset($decoded[0]['id'])) {
+                $orderData['cake_id'] = (int)$decoded[0]['id'];
+            }
+        }
         
         // Validate critical fields
         if ($orderData['user_id'] <= 0) {
             throw new Exception("Invalid user ID");
         }
         
+        // Validate cake_id after potential cart adjustment
         if ($orderData['cake_id'] <= 0) {
             throw new Exception("Invalid cake ID");
         }
@@ -185,6 +202,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         
         if ($orderId) {
             error_log("Order created successfully with ID: $orderId");
+            // Clear cart if this was a cart checkout
+            if (isset($_POST['cart_items'])) {
+                $_SESSION['cart'] = [];
+            }
             echo json_encode([
                 'success' => true,
                 'message' => 'Order placed successfully',

@@ -1,5 +1,5 @@
 <?php
-// payment.php - CORRECTED VERSION
+// cart_payment.php - Handle Payment for Full Cart
 session_start();
 
 // Database Configuration Class
@@ -33,31 +33,6 @@ class Database {
     }
 }
 
-// Cake Model Class
-class Cake {
-    private $db;
-    private $conn;
-    
-    public function __construct() {
-        $this->db = new Database();
-        $this->conn = $this->db->getConnection();
-    }
-    
-    public function getCakeById($id) {
-        $stmt = $this->conn->prepare("SELECT * FROM cakes WHERE id = ?");
-        $stmt->bind_param("i", $id);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $cake = $result->fetch_assoc();
-        $stmt->close();
-        return $cake;
-    }
-    
-    public function __destruct() {
-        $this->db->closeConnection();
-    }
-}
-
 // User Authentication Class
 class User {
     public function isLoggedIn() {
@@ -77,7 +52,7 @@ class User {
     }
     
     public function getUserId() {
-        return isset($_SESSION['user_id']) ? $_SESSION['user_id'] : 1; // Default to 1 for testing
+        return isset($_SESSION['user_id']) ? $_SESSION['user_id'] : 1;
     }
 }
 
@@ -90,36 +65,23 @@ class PaymentHandler {
     }
 }
 
-// Initialize Objects
+// Initialize
 $userModel = new User();
-$cakeModel = new Cake();
 $paymentHandler = new PaymentHandler();
 
-$isCartCheckout = false;
-$cartItems = [];
+// Check if cart is empty
+if (!isset($_SESSION['cart']) || empty($_SESSION['cart'])) {
+    header('Location: cart.php');
+    exit();
+}
 
-if (isset($_GET['id']) && isset($_GET['name']) && isset($_GET['price'])) {
-    $cakeId = intval($_GET['id']);
-    $cakeName = $_GET['name'];
-    $cakePrice = floatval($_GET['price']);
-    $cake = $cakeModel->getCakeById($cakeId);
-    if (!$cake) {
-        die("Cake not found in database. Please check the cake ID.");
-    }
-} else {
-    $sessionCart = isset($_SESSION['cart']) ? $_SESSION['cart'] : [];
-    if (empty($sessionCart)) {
-        header('Location: cart.php');
-        exit();
-    }
-    $isCartCheckout = true;
-    $cartItems = array_values($sessionCart);
-    $cakeId = 0;
-    $cakeName = 'Cart Items (' . count($cartItems) . ')';
-    $cakePrice = 0.0;
-    foreach ($cartItems as $it) {
-        $cakePrice += ((float)$it['price']) * ((int)$it['quantity']);
-    }
+$cartItems = $_SESSION['cart'];
+$totalAmount = 0;
+$totalQuantity = 0;
+
+foreach ($cartItems as $item) {
+    $totalAmount += $item['price'] * $item['quantity'];
+    $totalQuantity += $item['quantity'];
 }
 
 // User details
@@ -127,7 +89,6 @@ $userName = $userModel->getUserName();
 $userEmail = $userModel->getUserEmail();
 $userPhone = $userModel->getUserPhone();
 $userId = $userModel->getUserId();
-
 ?>
 
 <!DOCTYPE html>
@@ -135,7 +96,7 @@ $userId = $userModel->getUserId();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Payment - Sweet Delights</title>
+    <title>Cart Checkout - Sweet Delights</title>
     <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
     <style>
         * {
@@ -152,7 +113,7 @@ $userId = $userModel->getUserId();
         }
 
         .container {
-            max-width: 900px;
+            max-width: 1100px;
             margin: 40px auto;
             background: white;
             border-radius: 25px;
@@ -179,7 +140,7 @@ $userId = $userModel->getUserId();
 
         .content {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1.2fr 1fr;
             gap: 30px;
             padding: 40px;
         }
@@ -197,59 +158,40 @@ $userId = $userModel->getUserId();
             font-size: 24px;
         }
 
-        .product-info {
-            background: white;
-            padding: 20px;
-            border-radius: 15px;
+        .cart-items-list {
+            max-height: 400px;
+            overflow-y: auto;
             margin-bottom: 20px;
-            box-shadow: 0 3px 10px rgba(0,0,0,0.05);
         }
 
-        .product-info h3 {
+        .cart-item-row {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+
+        .cart-item-row h4 {
             color: #333;
-            font-size: 20px;
-            margin-bottom: 10px;
+            font-size: 16px;
+            margin-bottom: 8px;
         }
 
-        .product-info .price {
-            color: #667eea;
-            font-size: 28px;
-            font-weight: bold;
-            margin: 15px 0;
-        }
-
-        .quantity-selector {
+        .cart-item-details {
             display: flex;
-            align-items: center;
-            gap: 15px;
-            margin: 20px 0;
+            justify-content: space-between;
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 5px;
         }
 
-        .quantity-selector button {
-            width: 40px;
-            height: 40px;
-            border: none;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border-radius: 10px;
-            font-size: 20px;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-
-        .quantity-selector button:hover {
-            transform: scale(1.1);
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-        }
-
-        .quantity-selector input {
-            width: 60px;
-            height: 40px;
-            text-align: center;
-            border: 2px solid #667eea;
-            border-radius: 10px;
-            font-size: 18px;
+        .cart-item-total {
+            color: #667eea;
             font-weight: bold;
+            font-size: 16px;
+            margin-top: 8px;
+            text-align: right;
         }
 
         .price-breakdown {
@@ -270,7 +212,7 @@ $userId = $userModel->getUserId();
             border-top: 2px solid #667eea;
             padding-top: 15px;
             margin-top: 15px;
-            font-size: 20px;
+            font-size: 22px;
             font-weight: bold;
             color: #764ba2;
         }
@@ -417,7 +359,7 @@ $userId = $userModel->getUserId();
 <body>
     <div class="container">
         <div class="header">
-            <h1>🎂 Complete Your Order</h1>
+            <h1>🛒 Complete Your Cart Purchase</h1>
             <p>Secure payment powered by Razorpay</p>
         </div>
 
@@ -439,50 +381,41 @@ $userId = $userModel->getUserId();
             <div class="order-summary">
                 <h2>📋 Order Summary</h2>
                 
-                <div class="product-info">
-                    <h3><?= htmlspecialchars($cakeName) ?></h3>
-                    <div class="price">₹<?= number_format($cakePrice, 2) ?></div>
-                    <?php if ($isCartCheckout): ?>
-                        <div style="margin-top:15px;">
-                            <?php foreach ($cartItems as $ci): ?>
-                                <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px dashed #eee;">
-                                    <span><?= htmlspecialchars($ci['name']) ?> × <?= (int)$ci['quantity'] ?></span>
-                                    <span>₹<?= number_format($ci['price'] * $ci['quantity'], 2) ?></span>
-                                </div>
-                            <?php endforeach; ?>
+                <div class="cart-items-list">
+                    <?php foreach ($cartItems as $item): ?>
+                        <div class="cart-item-row">
+                            <h4><?= htmlspecialchars($item['name']) ?></h4>
+                            <div class="cart-item-details">
+                                <span>Price: ₹<?= number_format($item['price'], 2) ?></span>
+                                <span>Qty: <?= $item['quantity'] ?></span>
+                            </div>
+                            <div class="cart-item-total">
+                                Subtotal: ₹<?= number_format($item['price'] * $item['quantity'], 2) ?>
+                            </div>
                         </div>
-                    <?php else: ?>
-                        <div class="quantity-selector">
-                            <button onclick="decreaseQuantity()">-</button>
-                            <input type="number" id="quantity" value="1" min="1" max="10" readonly>
-                            <button onclick="increaseQuantity()">+</button>
-                            <span style="color: #666;">Quantity</span>
-                        </div>
-                    <?php endif; ?>
+                    <?php endforeach; ?>
                 </div>
 
                 <div class="price-breakdown">
-                    <?php if (!$isCartCheckout): ?>
-                        <div class="price-row">
-                            <span>Item Price:</span>
-                            <span id="itemPrice">₹<?= number_format($cakePrice, 2) ?></span>
-                        </div>
-                        <div class="price-row">
-                            <span>Quantity:</span>
-                            <span id="quantityDisplay">1</span>
-                        </div>
-                    <?php endif; ?>
+                    <div class="price-row">
+                        <span>Total Items:</span>
+                        <span><?= count($cartItems) ?> products</span>
+                    </div>
+                    <div class="price-row">
+                        <span>Total Quantity:</span>
+                        <span><?= $totalQuantity ?> items</span>
+                    </div>
                     <div class="price-row">
                         <span>Delivery Charges:</span>
                         <span style="color: #28a745;">FREE</span>
                     </div>
                     <div class="price-row total">
                         <span>Total Amount:</span>
-                        <span id="totalAmount">₹<?= number_format($cakePrice, 2) ?></span>
+                        <span id="totalAmount">₹<?= number_format($totalAmount, 2) ?></span>
                     </div>
                 </div>
 
-                <a href="index.php" class="back-btn">← Back to Shop</a>
+                <a href="cart.php" class="back-btn">← Back to Cart</a>
             </div>
 
             <div class="customer-details">
@@ -515,7 +448,7 @@ $userId = $userModel->getUserId();
                     </div>
 
                     <button type="button" class="payment-btn" id="paymentButton" onclick="initiatePayment()">
-                        🔒 Proceed to Secure Payment
+                        🔒 Pay ₹<?= number_format($totalAmount, 2) ?>
                     </button>
 
                     <div class="secure-badge">
@@ -528,36 +461,9 @@ $userId = $userModel->getUserId();
     </div>
 
     <script>
-        const basePrice = <?= $cakePrice ?>;
-        const cakeId = <?= $cakeId ?>;
-        const cakeName = "<?= addslashes($cakeName) ?>";
-        const isCartCheckout = <?= $isCartCheckout ? 'true' : 'false' ?>;
-        const cartItems = <?= json_encode($cartItems) ?>;
+        const cartItems = <?= json_encode(array_values($cartItems)) ?>;
+        const totalAmount = <?= $totalAmount ?>;
         const userId = <?= $userId ?>;
-
-        function updatePrice() {
-            const quantity = parseInt(document.getElementById('quantity').value);
-            const total = basePrice * quantity;
-            
-            document.getElementById('quantityDisplay').textContent = quantity;
-            document.getElementById('totalAmount').textContent = '₹' + total.toFixed(2);
-        }
-
-        function increaseQuantity() {
-            const input = document.getElementById('quantity');
-            if (parseInt(input.value) < 10) {
-                input.value = parseInt(input.value) + 1;
-                updatePrice();
-            }
-        }
-
-        function decreaseQuantity() {
-            const input = document.getElementById('quantity');
-            if (parseInt(input.value) > 1) {
-                input.value = parseInt(input.value) - 1;
-                updatePrice();
-            }
-        }
 
         function initiatePayment() {
             const name = document.getElementById('customerName').value.trim();
@@ -575,20 +481,17 @@ $userId = $userModel->getUserId();
             paymentBtn.disabled = true;
             paymentBtn.textContent = 'Opening Payment Gateway...';
 
-            const quantity = isCartCheckout ? 1 : parseInt(document.getElementById('quantity').value);
-            const totalAmount = isCartCheckout ? basePrice : basePrice * quantity;
-
             var options = {
                 "key": "<?= $paymentHandler->getRazorpayKey() ?>",
                 "amount": totalAmount * 100, // Amount in paise
                 "currency": "INR",
                 "name": "Sweet Delights",
-                "description": cakeName,
+                "description": "Cart Purchase - " + cartItems.length + " items",
                 "image": "https://cdn-icons-png.flaticon.com/512/3081/3081559.png",
                 "handler": function (response) {
                     console.log("Payment successful:", response);
                     // Payment successful - save order
-                    saveOrder(response.razorpay_payment_id, response.razorpay_order_id || 'NA', quantity, totalAmount);
+                    saveOrder(response.razorpay_payment_id, response.razorpay_order_id || 'NA');
                 },
                 "prefill": {
                     "name": name,
@@ -597,9 +500,7 @@ $userId = $userModel->getUserId();
                 },
                 "notes": {
                     "address": address,
-                    "cake_id": cakeId,
-                    "cake_name": cakeName,
-                    "items_summary": isCartCheckout ? (cartItems.map(i => `${i.name} x${i.quantity}`).join(', ')) : undefined
+                    "total_items": cartItems.length
                 },
                 "theme": {
                     "color": "#667eea"
@@ -608,7 +509,7 @@ $userId = $userModel->getUserId();
                     "ondismiss": function() {
                         console.log("Payment cancelled");
                         paymentBtn.disabled = false;
-                        paymentBtn.textContent = '🔒 Proceed to Secure Payment';
+                        paymentBtn.textContent = '🔒 Pay ₹' + totalAmount.toFixed(2);
                         showError("Payment cancelled by user");
                     }
                 }
@@ -618,7 +519,7 @@ $userId = $userModel->getUserId();
             rzp.on('payment.failed', function (response) {
                 console.log("Payment failed:", response);
                 paymentBtn.disabled = false;
-                paymentBtn.textContent = '🔒 Proceed to Secure Payment';
+                paymentBtn.textContent = '🔒 Pay ₹' + totalAmount.toFixed(2);
                 showError(response.error.description);
             });
             
@@ -627,13 +528,13 @@ $userId = $userModel->getUserId();
             } catch (error) {
                 console.error("Error opening Razorpay:", error);
                 paymentBtn.disabled = false;
-                paymentBtn.textContent = '🔒 Proceed to Secure Payment';
+                paymentBtn.textContent = '🔒 Pay ₹' + totalAmount.toFixed(2);
                 showError("Failed to open payment gateway");
             }
         }
 
-        function saveOrder(paymentId, orderId, quantity, totalAmount) {
-            console.log("Saving order with:", {paymentId, orderId, quantity, totalAmount});
+        function saveOrder(paymentId, orderId) {
+            console.log("Saving cart order with:", {paymentId, orderId});
             
             // Show loading
             document.getElementById('loadingMessage').style.display = 'block';
@@ -641,12 +542,9 @@ $userId = $userModel->getUserId();
             
             // Save order to database
             const formData = new FormData();
-            formData.append('action', 'save_order');
+            formData.append('action', 'save_cart_order');
             formData.append('user_id', userId);
-            formData.append('cake_id', cakeId);
-            formData.append('cake_name', cakeName);
-            formData.append('price', basePrice);
-            formData.append('quantity', quantity);
+            formData.append('cart_items', JSON.stringify(cartItems));
             formData.append('total_amount', totalAmount);
             formData.append('payment_id', paymentId);
             formData.append('razorpay_order_id', orderId);
@@ -654,16 +552,9 @@ $userId = $userModel->getUserId();
             formData.append('customer_email', document.getElementById('customerEmail').value);
             formData.append('customer_phone', document.getElementById('customerPhone').value);
             formData.append('customer_address', document.getElementById('customerAddress').value);
-            let special = document.getElementById('specialInstructions').value;
-            if (isCartCheckout && cartItems.length) {
-                special += (special ? "\n\n" : "") + 'Items: ' + cartItems.map(i => `${i.name} x${i.quantity} (₹${(i.price*i.quantity).toFixed(2)})`).join(', ');
-            }
-            formData.append('special_instructions', special);
-            if (isCartCheckout) {
-                formData.append('cart_items', JSON.stringify(cartItems));
-            }
+            formData.append('special_instructions', document.getElementById('specialInstructions').value);
 
-            fetch('process_order.php', {
+            fetch('process_cart_order.php', {
                 method: 'POST',
                 body: formData
             })

@@ -158,6 +158,12 @@ class CakeView {
     public function renderHeader($user) {
         $isLoggedIn = $user->isLoggedIn();
         $userName = $user->getUserName();
+        $cartCount = 0;
+        if (isset($_SESSION['cart'])) {
+            foreach ($_SESSION['cart'] as $ci) {
+                $cartCount += (int)$ci['quantity'];
+            }
+        }
         ?>
         <header>
             <div class="header-container">
@@ -168,8 +174,6 @@ class CakeView {
                 
                 <nav class="nav-links">
                     <a href="index.php">🏠 Home</a>
-                   
-                    <a href="Add prodect.php">🎂Add Products</a>
                     <?php if ($isLoggedIn): ?>
                         <a href="my_orders.php">📦 My Orders</a>
                     <?php endif; ?>
@@ -177,6 +181,7 @@ class CakeView {
                 </nav>
                 
                 <div class="user-section">
+                    <a href="cart.php" class="auth-btn">🛒 Cart (<?= (int)$cartCount ?>)</a>
                     <?php if ($isLoggedIn): ?>
                         <span class="user-name">👋 <?= htmlspecialchars($userName) ?></span>
                         <a href="logout.php" class="auth-btn">Logout</a>
@@ -212,9 +217,14 @@ class CakeView {
                     <span class="price">₹<?= number_format($cake['price'], 2) ?></span>
                     <span class="price-label">per kg</span>
                 </div>
-                <a href="payment.php?id=<?= $cake['id'] ?>&name=<?= urlencode($cake['name']) ?>&price=<?= $cake['price'] ?>" class="btn">
-                    🛍️ Order Now
-                </a>
+                <div class="button-group">
+                    <a href="cart.php?id=<?= $cake['id'] ?>&name=<?= urlencode($cake['name']) ?>&price=<?= $cake['price'] ?>" class="btn btn-cart">
+                        🛒 Add to Cart
+                    </a>
+                    <a href="payment.php?id=<?= $cake['id'] ?>&name=<?= urlencode($cake['name']) ?>&price=<?= $cake['price'] ?>" class="btn btn-order">
+                        🛍️ Order Now
+                    </a>
+                </div>
             </div>
         </div>
         <?php
@@ -521,25 +531,43 @@ $cakes = $cakeModel->getAllCakes();
             font-size: 14px;
         }
 
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-direction: column;
+        }
+
         .btn {
             display: inline-block;
             width: 100%;
-            padding: 14px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 12px;
             color: white;
             text-decoration: none;
-            border-radius: 15px;
+            border-radius: 12px;
             font-weight: 700;
             text-align: center;
             transition: all 0.3s;
-            font-size: 16px;
-            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+            font-size: 15px;
         }
 
-        .btn:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.6);
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        .btn-cart {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            box-shadow: 0 4px 15px rgba(56, 239, 125, 0.3);
+        }
+
+        .btn-cart:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(56, 239, 125, 0.5);
+        }
+
+        .btn-order {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-order:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
         }
 
         /* Footer */
@@ -683,11 +711,6 @@ $cakes = $cakeModel->getAllCakes();
                 noResultsMsg.remove();
             }
         }
-
-        // Scroll to top button functionality
-        window.addEventListener('scroll', function() {
-            // Add any scroll-based animations here if needed
-        });
     </script>
 </body>
 </html>

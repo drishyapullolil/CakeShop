@@ -2,6 +2,20 @@
 // login.php - OOP Based Login System
 session_start();
 
+// Default admin configuration
+if (!defined('ADMIN_EMAIL')) {
+    define('ADMIN_EMAIL', 'admin@sweetdelights.com');
+}
+if (!defined('ADMIN_NAME')) {
+    define('ADMIN_NAME', 'Admin');
+}
+if (!defined('ADMIN_PHONE')) {
+    define('ADMIN_PHONE', '0000000000');
+}
+if (!defined('ADMIN_DEFAULT_PASSWORD')) {
+    define('ADMIN_DEFAULT_PASSWORD', 'Admin@123');
+}
+
 // Database Configuration Class
 class Database {
     private $host = "localhost";
@@ -43,6 +57,33 @@ class Auth {
     public function __construct() {
         $this->db = new Database();
         $this->conn = $this->db->getConnection();
+    }
+
+    // Ensure a default admin user exists
+    public function ensureDefaultAdmin() {
+        $email = ADMIN_EMAIL;
+        $name = ADMIN_NAME;
+        $phone = ADMIN_PHONE;
+        $passwordPlain = ADMIN_DEFAULT_PASSWORD;
+
+        $stmt = $this->conn->prepare("SELECT id FROM users WHERE email = ? LIMIT 1");
+        if ($stmt) {
+            $stmt->bind_param('s', $email);
+            $stmt->execute();
+            $stmt->store_result();
+            $exists = $stmt->num_rows > 0;
+            $stmt->close();
+            if ($exists) return; // already present
+        }
+
+        // Create admin user
+        $hashed = password_hash($passwordPlain, PASSWORD_DEFAULT);
+        $stmt2 = $this->conn->prepare("INSERT INTO users (name, email, phone, password, created_at) VALUES (?, ?, ?, ?, NOW())");
+        if ($stmt2) {
+            $stmt2->bind_param('ssss', $name, $email, $phone, $hashed);
+            $stmt2->execute();
+            $stmt2->close();
+        }
     }
     
     // Validate email format
@@ -95,6 +136,7 @@ class Auth {
                 $_SESSION['user_email'] = $user['email'];
                 $_SESSION['user_phone'] = $user['phone'];
                 $_SESSION['logged_in'] = true;
+                $_SESSION['is_admin'] = (strcasecmp($user['email'], ADMIN_EMAIL) === 0);
                 
                 $stmt->close();
                 return true;
@@ -204,10 +246,16 @@ class Auth {
 
 // Initialize Auth class
 $auth = new Auth();
+// Ensure default admin exists
+$auth->ensureDefaultAdmin();
 
 // Redirect if already logged in
 if ($auth->isLoggedIn()) {
-    header('Location: index.php');
+    if (isset($_SESSION['is_admin']) && $_SESSION['is_admin'] === true) {
+        header('Location: admin_add_product.php');
+    } else {
+        header('Location: index.php');
+    }
     exit();
 }
 
@@ -222,7 +270,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $password = $_POST['password'];
         
         if ($auth->login($email, $password)) {
-            header('Location: index.php');
+            if (isset($_SESSION['is_admin']) && $_SESSION['is_admin'] === true) {
+                header('Location: admin_add_product.php');
+            } else {
+                header('Location: index.php');
+            }
             exit();
         } else {
             $errors = $auth->getErrors();
@@ -395,6 +447,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
         }
 
+        .is-invalid {
+            border-color: #dc3545 !important;
+            box-shadow: 0 0 0 3px rgba(220, 53, 69, 0.12) !important;
+        }
+
+        .is-valid {
+            border-color: #28a745 !important;
+            box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.12) !important;
+        }
+
+        .field-error {
+            color: #dc3545;
+            font-size: 12px;
+            margin-top: 6px;
+            min-height: 14px;
+        }
+
         .password-toggle {
             position: absolute;
             right: 15px;
@@ -427,6 +496,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         .submit-btn:active {
             transform: translateY(0);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            box-shadow: none;
         }
 
         .forgot-password {
@@ -597,8 +672,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <label>Email Address</label>
                         <div class="input-wrapper">
                             <span class="input-icon">📧</span>
-                            <input type="email" name="email" placeholder="Enter your email" required>
+                            <input type="email" id="loginEmail" name="email" placeholder="Enter your email" required>
                         </div>
+                        <div class="field-error" id="loginEmailError"></div>
                     </div>
 
                     <div class="form-group">
@@ -608,9 +684,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <input type="password" id="loginPassword" name="password" placeholder="Enter your password" required>
                             <span class="password-toggle" onclick="togglePassword('loginPassword')">👁️</span>
                         </div>
+                        <div class="field-error" id="loginPasswordError"></div>
                     </div>
 
-                    <button type="submit" name="login" class="submit-btn">
+                    <button type="submit" id="loginSubmit" name="login" class="submit-btn" disabled>
                         Login to Account
                     </button>
 
@@ -635,24 +712,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <label>Full Name</label>
                         <div class="input-wrapper">
                             <span class="input-icon">👤</span>
-                            <input type="text" name="name" placeholder="Enter your full name" required>
+                            <input type="text" id="regName" name="name" placeholder="Enter your full name" required>
                         </div>
+                        <div class="field-error" id="regNameError"></div>
                     </div>
 
                     <div class="form-group">
                         <label>Email Address</label>
                         <div class="input-wrapper">
                             <span class="input-icon">📧</span>
-                            <input type="email" name="reg_email" placeholder="Enter your email" required>
+                            <input type="email" id="regEmail" name="reg_email" placeholder="Enter your email" required>
                         </div>
+                        <div class="field-error" id="regEmailError"></div>
                     </div>
 
                     <div class="form-group">
                         <label>Phone Number</label>
                         <div class="input-wrapper">
                             <span class="input-icon">📱</span>
-                            <input type="tel" name="phone" placeholder="10 digit mobile number" pattern="[0-9]{10}" required>
+                            <input type="tel" id="regPhone" name="phone" placeholder="10 digit mobile number" pattern="[0-9]{10}" required>
                         </div>
+                        <div class="field-error" id="regPhoneError"></div>
                     </div>
 
                     <div class="form-group">
@@ -668,6 +748,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             </div>
                             <span id="strengthText"></span>
                         </div>
+                        <div class="field-error" id="regPasswordError"></div>
                     </div>
 
                     <div class="form-group">
@@ -677,9 +758,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <input type="password" id="confirmPassword" name="confirm_password" placeholder="Re-enter your password" required>
                             <span class="password-toggle" onclick="togglePassword('confirmPassword')">👁️</span>
                         </div>
+                        <div class="field-error" id="confirmPasswordError"></div>
                     </div>
 
-                    <button type="submit" name="register" class="submit-btn">
+                    <button type="submit" id="registerSubmit" name="register" class="submit-btn" disabled>
                         Create Account
                     </button>
 
@@ -754,6 +836,112 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 strengthText.style.color = '#28a745';
             }
         }
+
+        // Real-time validation (Flipkart-like)
+        document.addEventListener('DOMContentLoaded', () => {
+            // Login form elements
+            const loginEmail = document.getElementById('loginEmail');
+            const loginPassword = document.getElementById('loginPassword');
+            const loginEmailError = document.getElementById('loginEmailError');
+            const loginPasswordError = document.getElementById('loginPasswordError');
+            const loginSubmit = document.getElementById('loginSubmit');
+
+            // Registration form elements
+            const regName = document.getElementById('regName');
+            const regEmail = document.getElementById('regEmail');
+            const regPhone = document.getElementById('regPhone');
+            const regPassword = document.getElementById('regPassword');
+            const confirmPassword = document.getElementById('confirmPassword');
+            const regNameError = document.getElementById('regNameError');
+            const regEmailError = document.getElementById('regEmailError');
+            const regPhoneError = document.getElementById('regPhoneError');
+            const regPasswordError = document.getElementById('regPasswordError');
+            const confirmPasswordError = document.getElementById('confirmPasswordError');
+            const registerSubmit = document.getElementById('registerSubmit');
+
+            const emailRe = /^\S+@\S+\.\S+$/;
+            const phoneRe = /^[0-9]{10}$/;
+
+            function setValid(el, isValid, msgEl, msg) {
+                if (!el) return false;
+                if (isValid) {
+                    el.classList.remove('is-invalid');
+                    el.classList.add('is-valid');
+                    if (msgEl) msgEl.textContent = '';
+                } else {
+                    el.classList.remove('is-valid');
+                    el.classList.add('is-invalid');
+                    if (msgEl) msgEl.textContent = msg || '';
+                }
+                return isValid;
+            }
+
+            function validateLogin() {
+                const eValid = setValid(
+                    loginEmail,
+                    !!loginEmail && emailRe.test(loginEmail.value.trim()),
+                    loginEmailError,
+                    'Please enter a valid email'
+                );
+                // For login password: no real-time validation UI, only require non-empty to enable submit
+                const pValid = !!loginPassword && loginPassword.value.length > 0;
+                if (loginPassword) {
+                    loginPassword.classList.remove('is-invalid');
+                    loginPassword.classList.remove('is-valid');
+                }
+                if (loginPasswordError) loginPasswordError.textContent = '';
+                if (loginSubmit) loginSubmit.disabled = !(eValid && pValid);
+            }
+
+            function validateRegister() {
+                const nValid = setValid(
+                    regName,
+                    !!regName && regName.value.trim().length >= 3,
+                    regNameError,
+                    'Name must be at least 3 characters'
+                );
+                const eValid = setValid(
+                    regEmail,
+                    !!regEmail && emailRe.test(regEmail.value.trim()),
+                    regEmailError,
+                    'Please enter a valid email'
+                );
+                const phValid = setValid(
+                    regPhone,
+                    !!regPhone && phoneRe.test(regPhone.value.trim()),
+                    regPhoneError,
+                    'Enter 10 digit mobile number'
+                );
+                const rpValid = setValid(
+                    regPassword,
+                    !!regPassword && regPassword.value.length >= 6,
+                    regPasswordError,
+                    'Minimum 6 characters'
+                );
+                const cValid = setValid(
+                    confirmPassword,
+                    !!confirmPassword && confirmPassword.value === regPassword.value && confirmPassword.value.length > 0,
+                    confirmPasswordError,
+                    'Passwords do not match'
+                );
+                if (registerSubmit) registerSubmit.disabled = !(nValid && eValid && phValid && rpValid && cValid);
+            }
+
+            // Attach input listeners for real-time feedback
+            if (loginEmail) loginEmail.addEventListener('input', validateLogin);
+            // For login password: attach listener to enable button when user types (no inline errors/styling)
+            if (loginPassword) loginPassword.addEventListener('input', validateLogin);
+            if (regName) regName.addEventListener('input', validateRegister);
+            if (regEmail) regEmail.addEventListener('input', validateRegister);
+            if (regPhone) regPhone.addEventListener('input', validateRegister);
+            if (regPassword) regPassword.addEventListener('input', validateRegister);
+            if (confirmPassword) confirmPassword.addEventListener('input', validateRegister);
+
+            // Initial validation on load and after autofill
+            validateLogin();
+            setTimeout(validateLogin, 150);
+            validateRegister();
+        });
     </script>
 </body>
 </html>
